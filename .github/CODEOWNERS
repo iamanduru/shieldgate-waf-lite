@@ -1,0 +1,9 @@
+# Default owner for all files
+* @iamanduru
+
+# Security-sensitive areas
+/src/ @iamanduru
+/prisma/ @iamanduru
+/.github/ @iamanduru
+/package.json @iamanduru
+/package-lock.json @iamanduru

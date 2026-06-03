@@ -1,0 +1,270 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id                  String             @id @db.Char(36)
+  name                String             @db.VarChar(255)
+  slug                String             @unique(map: "slug") @db.VarChar(100)
+  status              tenants_status     @default(active)
+  createdAt           DateTime?          @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt           DateTime?          @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
+  allowlists          Allowlist[]
+  configs             Config[]
+  decisions           Decision[]
+  denylists           Denylist[]
+  events              Event[]
+  rate_limit_counters RateLimitCounter[]
+
+  @@map("tenants")
+}
+
+model Config {
+  id                       String       @id @db.Char(36)
+  tenantId                 String       @map("tenant_id") @db.Char(36)
+  mode                     configs_mode @default(protection)
+  paranoiaLevel            Int          @default(1) @map("paranoia_level")
+  blockingThreshold        Int          @default(8) @map("blocking_threshold")
+  bodyInspectionLimitBytes Int          @default(65536) @map("body_inspection_limit_bytes")
+  rateLimitingEnabled      Boolean      @default(true) @map("rate_limiting_enabled")
+  trustedProxies           Json?        @map("trusted_proxies")
+  activeRuleBundleVersion  String?      @default("1.0.0") @map("active_rule_bundle_version") @db.VarChar(50)
+  createdAt                DateTime?    @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt                DateTime?    @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
+  tenant                   Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_configs_tenant")
+
+  @@index([tenantId], map: "fk_configs_tenant")
+  @@map("configs")
+}
+
+model Rule {
+  id             String         @id @db.VarChar(100)
+  category       rules_category
+  description    String         @db.Text
+  severity       rules_severity
+  paranoiaLevel  Int            @default(1) @map("paranoia_level")
+  enabled        Boolean        @default(true)
+  currentVersion String         @default("1.0.0") @map("current_version") @db.VarChar(50)
+  createdAt      DateTime?      @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt      DateTime?      @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
+  versions       RuleVersion[]
+
+  @@map("rules")
+}
+
+model RuleVersion {
+  id         String    @id @db.Char(36)
+  ruleId     String    @map("rule_id") @db.VarChar(100)
+  version    String    @db.VarChar(50)
+  definition Json
+  createdBy  String    @map("created_by") @db.VarChar(255)
+  createdAt  DateTime? @default(now()) @map("created_at") @db.Timestamp(0)
+  rule       Rule      @relation(fields: [ruleId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_rule_versions_rule")
+
+  @@unique([ruleId, version], map: "unique_rule_version")
+  @@map("rule_versions")
+}
+
+model Decision {
+  id                String             @id @db.Char(36)
+  requestId         String             @map("request_id") @db.VarChar(100)
+  tenantId          String             @map("tenant_id") @db.Char(36)
+  mode              decisions_mode
+  decision          decisions_decision
+  statusCode        Int?               @map("status_code")
+  anomalyScore      Int                @default(0) @map("anomaly_score")
+  matchedRuleIds    Json?              @map("matched_rule_ids")
+  configVersion     String?            @map("config_version") @db.VarChar(50)
+  ruleBundleVersion String?            @map("rule_bundle_version") @db.VarChar(50)
+  method            String?            @db.VarChar(20)
+  path              String?            @db.VarChar(2048)
+  clientIpHash      String?            @map("client_ip_hash") @db.VarChar(255)
+  userAgentHash     String?            @map("user_agent_hash") @db.VarChar(255)
+  durationMs        Decimal?           @map("duration_ms") @db.Decimal(10, 3)
+  createdAt         DateTime?          @default(now()) @map("created_at") @db.Timestamp(0)
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_decisions_tenant")
+
+  @@index([decision], map: "idx_decisions_decision")
+  @@index([requestId], map: "idx_decisions_request_id")
+  @@index([anomalyScore], map: "idx_decisions_score")
+  @@index([tenantId, createdAt], map: "idx_decisions_tenant_created")
+  @@map("decisions")
+}
+
+model Event {
+  id            String    @id @db.Char(36)
+  requestId     String    @map("request_id") @db.VarChar(100)
+  tenantId      String    @map("tenant_id") @db.Char(36)
+  eventType     String    @map("event_type") @db.VarChar(100)
+  category      String?   @db.VarChar(100)
+  severity      String?   @db.VarChar(50)
+  sanitizedData Json      @map("sanitized_data")
+  createdAt     DateTime? @default(now()) @map("created_at") @db.Timestamp(0)
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_events_tenant")
+
+  @@index([category], map: "idx_events_category")
+  @@index([requestId], map: "idx_events_request_id")
+  @@index([severity], map: "idx_events_severity")
+  @@index([tenantId, createdAt], map: "idx_events_tenant_created")
+  @@map("events")
+}
+
+model Allowlist {
+  id              String    @id @db.Char(36)
+  tenantId        String    @map("tenant_id") @db.Char(36)
+  description     String    @db.Text
+  scope           Json
+  suppressedRules Json      @map("suppressed_rules")
+  reason          String    @db.Text
+  approvedBy      String    @map("approved_by") @db.VarChar(255)
+  expiresAt       DateTime? @map("expires_at") @db.Timestamp(0)
+  createdAt       DateTime? @default(now()) @map("created_at") @db.Timestamp(0)
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_allowlists_tenant")
+
+  @@index([expiresAt], map: "idx_allowlists_expires")
+  @@index([tenantId], map: "idx_allowlists_tenant")
+  @@map("allowlists")
+}
+
+model Denylist {
+  id        String              @id @db.Char(36)
+  tenantId  String              @map("tenant_id") @db.Char(36)
+  denyType  denylists_deny_type @map("deny_type")
+  denyValue String              @map("deny_value") @db.VarChar(500)
+  reason    String              @db.Text
+  action    denylists_action    @default(block)
+  expiresAt DateTime?           @map("expires_at") @db.Timestamp(0)
+  createdAt DateTime?           @default(now()) @map("created_at") @db.Timestamp(0)
+  tenant    Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_denylists_tenant")
+
+  @@index([expiresAt], map: "idx_denylists_expires")
+  @@index([tenantId, denyType], map: "idx_denylists_tenant_type")
+  @@map("denylists")
+}
+
+model AuditLog {
+  id           String    @id @db.Char(36)
+  tenantId     String?   @map("tenant_id") @db.Char(36)
+  actorId      String    @map("actor_id") @db.VarChar(255)
+  action       String    @db.VarChar(100)
+  resourceType String    @map("resource_type") @db.VarChar(100)
+  resourceId   String    @map("resource_id") @db.VarChar(255)
+  beforeValue  Json?     @map("before_value")
+  afterValue   Json?     @map("after_value")
+  requestId    String    @map("request_id") @db.VarChar(100)
+  sourceIpHash String?   @map("source_ip_hash") @db.VarChar(255)
+  createdAt    DateTime? @default(now()) @map("created_at") @db.Timestamp(0)
+
+  @@index([action], map: "idx_audit_action")
+  @@index([actorId], map: "idx_audit_actor")
+  @@index([tenantId, createdAt], map: "idx_audit_tenant_created")
+  @@map("audit_logs")
+}
+
+model AdminUser {
+  id           String             @id @db.Char(36)
+  email        String             @unique(map: "email") @db.VarChar(255)
+  passwordHash String             @map("password_hash") @db.VarChar(255)
+  role         admin_users_role   @default(viewer)
+  status       admin_users_status @default(active)
+  lastLoginAt  DateTime?          @map("last_login_at") @db.Timestamp(0)
+  createdAt    DateTime?          @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt    DateTime?          @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  @@map("admin_users")
+}
+
+model RateLimitCounter {
+  id           String   @id @db.Char(36)
+  tenantId     String   @map("tenant_id") @db.Char(36)
+  rateKey      String   @map("rate_key") @db.VarChar(255)
+  tokens       Decimal  @default(0.000) @db.Decimal(10, 3)
+  lastRefillAt DateTime @default(now()) @map("last_refill_at") @db.Timestamp(0)
+  expiresAt    DateTime @map("expires_at") @db.Timestamp(0)
+  tenants      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_rate_limit_tenant")
+
+  @@unique([tenantId, rateKey], map: "unique_rate_key")
+  @@index([expiresAt], map: "idx_rate_limit_expires")
+  @@map("rate_limit_counters")
+}
+
+enum rules_category {
+  sqli
+  xss
+  path_traversal
+  headers
+  bot
+  protocol
+  rate_limit
+}
+
+enum configs_mode {
+  protection
+  monitor
+  simulation
+  emergency_lockdown
+}
+
+enum denylists_deny_type {
+  ip
+  ip_hash
+  user_agent_hash
+  path
+  header
+  country
+  asn
+}
+
+enum decisions_mode {
+  protection
+  monitor
+  simulation
+  emergency_lockdown
+}
+
+enum tenants_status {
+  active
+  inactive
+  suspended
+}
+
+enum rules_severity {
+  info
+  low
+  medium
+  high
+  critical
+}
+
+enum admin_users_role {
+  viewer
+  security_analyst
+  rule_admin
+  tenant_admin
+  security_admin
+  auditor
+}
+
+enum decisions_decision {
+  allow
+  block
+  rate_limit
+  monitor
+  simulate
+}
+
+enum admin_users_status {
+  active
+  inactive
+  locked
+}
+
+enum denylists_action {
+  block
+  rate_limit
+}
